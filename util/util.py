@@ -17,10 +17,10 @@ def im2uint8(x):
 
 def ResnetBlock(x, dim, ksize, scope='rb'):
     with tf.variable_scope(scope):
-        net = slim.separable_conv2d(x, 0, [ksize, ksize], scope='dw_conv1')
-        net = slim.conv2d(net, dim, [1, 1], scope='pw_conv1')
-        net = slim.separable_conv2d(x, 0, [ksize, ksize], scope='dw_conv2')
-        net = slim.conv2d(net, dim, [1, 1], activation_fn=None, scope='pw_conv2')
+        net = slim.separable_conv2d(x, dim, [ksize, ksize], scope='dw_conv1')
+        # net = slim.conv2d(net, dim, [1, 1], scope='pw_conv1')
+        net = slim.separable_conv2d(net, dim, [ksize, ksize], scope='dw_conv2')
+        # net = slim.conv2d(net, dim, [1, 1], activation_fn=None, scope='pw_conv2')
         # net = slim.conv2d(x, dim, [ksize, ksize], scope='conv1')
         # net = slim.conv2d(net, dim, [ksize, ksize], activation_fn=None, scope='conv2')
         return net + x

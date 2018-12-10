@@ -8,7 +8,7 @@ import models.model as model
 
 def parse_args():
     parser = argparse.ArgumentParser(description='deblur arguments')
-    parser.add_argument('--phase', type=str, default='test', help='determine whether train or test')
+    parser.add_argument('--phase', type=str, default='test', help='determine whether [test | train | check]')
     parser.add_argument('--datalist', type=str, default='./datalist_gopro.txt', help='training datalist')
     parser.add_argument('--model', type=str, default='color', help='model type: [lstm | gray | color]')
     parser.add_argument('--batch_size', help='training batch size', type=int, default=16)
