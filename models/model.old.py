@@ -72,7 +72,7 @@ class DEBLUR(object):
 
         x_unwrap = []
         with tf.variable_scope(scope, reuse=reuse):
-            with slim.arg_scope([slim.conv2d, slim.conv2d_transpose, slim.separable_conv2d],
+            with slim.arg_scope([slim.conv2d, slim.conv2d_transpose],
                                 activation_fn=tf.nn.relu, padding='SAME', normalizer_fn=None,
                                 weights_initializer=tf.contrib.layers.xavier_initializer(uniform=True),
                                 biases_initializer=tf.constant_initializer(0.0)):
@@ -89,22 +89,15 @@ class DEBLUR(object):
                         rnn_state = tf.image.resize_images(rnn_state, [hi // 4, wi // 4], method=0)
 
                     # encoder
-                    # conv1_1 = slim.conv2d(inp_all, 32, [5, 5], scope='enc1_1')
-                    # conv1_1 = slim.separable_conv2d(inp_all, 0, [ksize, ksize], scope='enc1_1')
-                    conv1_1_dw = slim.separable_conv2d(inp_all, 0, [5, 5], scope='enc1_1_dw')
-                    conv1_1 = slim.conv2d(conv1_1_dw, 32, [1, 1], scope='enc1_1')
+                    conv1_1 = slim.conv2d(inp_all, 32, [5, 5], scope='enc1_1')
                     conv1_2 = ResnetBlock(conv1_1, 32, 5, scope='enc1_2')
                     conv1_3 = ResnetBlock(conv1_2, 32, 5, scope='enc1_3')
                     conv1_4 = ResnetBlock(conv1_3, 32, 5, scope='enc1_4')
-                    # conv2_1 = slim.conv2d(conv1_4, 64, [5, 5], stride=2, scope='enc2_1')
-                    conv2_1_dw = slim.separable_conv2d(conv1_4, 0, [5, 5], stride=2, scope='enc2_1_dw')
-                    conv2_1 = slim.conv2d(conv2_1_dw, 64, [1, 1], scope='enc2_1')
+                    conv2_1 = slim.conv2d(conv1_4, 64, [5, 5], stride=2, scope='enc2_1')
                     conv2_2 = ResnetBlock(conv2_1, 64, 5, scope='enc2_2')
                     conv2_3 = ResnetBlock(conv2_2, 64, 5, scope='enc2_3')
                     conv2_4 = ResnetBlock(conv2_3, 64, 5, scope='enc2_4')
-                    # conv3_1 = slim.conv2d(conv2_4, 128, [5, 5], stride=2, scope='enc3_1')
-                    conv3_1_dw = slim.separable_conv2d(conv2_4, 0, [5, 5], stride=2, scope='enc3_1_dw')
-                    conv3_1 = slim.conv2d(conv3_1_dw, 128, [1, 1], scope='enc3_1')
+                    conv3_1 = slim.conv2d(conv2_4, 128, [5, 5], stride=2, scope='enc3_1')
                     conv3_2 = ResnetBlock(conv3_1, 128, 5, scope='enc3_2')
                     conv3_3 = ResnetBlock(conv3_2, 128, 5, scope='enc3_3')
                     conv3_4 = ResnetBlock(conv3_3, 128, 5, scope='enc3_4')
@@ -129,9 +122,7 @@ class DEBLUR(object):
                     deconv1_2 = ResnetBlock(deconv1_3, 32, 5, scope='dec1_2')
                     deconv1_1 = ResnetBlock(deconv1_2, 32, 5, scope='dec1_1')
                     inp_pred = slim.conv2d(deconv1_1, self.chns, [5, 5], activation_fn=None, scope='dec1_0')
-                    # inp_pred_dw = slim.separable_conv2d(deconv1_1, self.chns, [5, 5], activation_fn=None, scope='dec1_0_dw')
-                    # inp_pred = slim.conv2d(inp_pred_dw, self.chns, [1, 1], activation_fn=None, scope='dec1_0')
-                    
+
                     if i >= 0:
                         x_unwrap.append(inp_pred)
                     if i == 0:
