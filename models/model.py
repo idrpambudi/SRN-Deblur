@@ -229,9 +229,9 @@ class DEBLUR(object):
                 sec_per_batch = float(duration)
 
                 format_str = ('%s: step %d, loss = (%.5f; %.5f, %.5f)(%.1f data/s; %.3f s/bch)')
-                format_str = '{}: step {}, loss = ({:.5f}; {:.5f}, {:.5f})({:.1f} data/s; {:.1f} s/bch)'
-                format_str = format_str.format((datetime.now().strftime('%Y-%m-%d %H:%M:%S'), step, loss_total_val, 0.0,
-                                    0.0, examples_per_sec, sec_per_batch))
+                # format_str = '{}: step {}, loss = ({:.5f}; {:.5f}, {:.5f})({:.1f} data/s; {:.1f} s/bch)'
+                # format_str = format_str.format((datetime.now().strftime('%Y-%m-%d %H:%M:%S'), step, loss_total_val, 0.0, 
+                #                     0.0, examples_per_sec, sec_per_batch))
                 print(format_str % (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), step, loss_total_val, 0.0,
                                     0.0, examples_per_sec, sec_per_batch))
 
