@@ -36,6 +36,7 @@ class DEBLUR(object):
         self.learning_rate = args.learning_rate
         print(len(self.data_list))
         print(self.data_size)
+        print(self.epoch)
 
     def input_producer(self, batch_size=10):
         def read_data():
@@ -223,7 +224,7 @@ class DEBLUR(object):
             epoch_loss = 0
             epoch_start_time = time.time()
 
-            iterator = tqdm(range(self.data_size), leave=False, desc='Epoch {}'.format(ep), ncols=100)
+            iterator = tqdm(range(self.data_size))
             for step in iterator:
                 # update G network
                 _, loss_total_val = sess.run([train_gnet, self.loss_total])
@@ -231,21 +232,19 @@ class DEBLUR(object):
                 epoch_loss += loss_total_val
                 global_step += 1
 
-                iterator.set_postfix({'step_loss': loss_total_val})
+                iterator.set_postfix({'loss': loss_total_val})
 
+            mean_epoch_loss = epoch_loss / len(self.data_list)
             epoch_duration = time.time() - epoch_start_time
-            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            mean_epoch_loss = epoch_loss * self.batch_size / len(self.data_list)
             data_per_second = len(self.data_list) / epoch_duration
+            current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-            epoch_str = 'Epoch {}: average_loss = {:.5f} ({:.1f} data/s; {:.2f} s/epoch), {}'.format(
-                ep, mean_epoch_loss, data_per_second, epoch_duration, current_time)
+            epoch_str = '{}: epoch {}, loss = {:.6f} ({:.1f} data/s; {:.2f} s/epoch)'.format(current_time, ep, mean_epoch_loss, data_per_second, epoch_duration)
             tqdm.write(epoch_str)
    
             summary_str = sess.run(summary_op)
             summary_writer.add_summary(summary_str, global_step=global_step)
-            
-            # Save the model checkpoint periodically every 5 epoch.
+            # Save the model checkpoint periodically.
             if ep % 5 == 0 or ep == self.epoch:
                 checkpoint_path = os.path.join(self.train_dir, 'checkpoints')
                 self.save(sess, checkpoint_path, ep)
@@ -275,38 +274,6 @@ class DEBLUR(object):
         else:
             print(" [*] Reading checkpoints... ERROR")
             return False
-
-    def eval(self, step, height=720, width=1280, file_dir='eval_set'):
-        inp_chns = 3 if self.args.model == 'color' else 1
-        self.batch_size = 1 if self.args.model == 'color' else 3
-        inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=tf.float32)
-        img_gt = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=tf.float32)
-        outputs = self.generator(inputs, reuse=False)
-    
-        sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
-
-        self.saver = tf.train.Saver()
-        self.load(sess, self.train_dir, step=step)
-
-        # calculate multi-scale loss
-        loss_total = 0
-        for i in range(self.n_levels):
-            _, hi, wi, _ = outputs[i].get_shape().as_list()
-            gt_i = tf.image.resize_images(img_gt, [hi, wi], method=0)
-            loss = tf.reduce_mean((gt_i - outputs[i]) ** 2)
-            loss_total += loss
-        
-        eval_loss = 0
-        iterator = tqdm(range(len(self.data_list)))
-        for i in iterator:
-            sharp = cv2.imread(os.path.join(file_dir, self.data_list[i][0]))
-            sharp = np.expand_dims(sharp, axis=0)
-            blur = cv2.imread(os.path.join(file_dir, self.data_list[i][1]))
-            blur = np.expand_dims(blur, axis=0)
-            loss = sess.run(loss_total, feed_dict={inputs: blur/255.0, img_gt: sharp/255.0})
-            eval_loss += loss
-            iterator.set_postfix_str('loss = {}'.format(loss))
-        print(eval_loss / len(self.data_list))
 
     def test(self, height, width, input_path, output_path, step):
         if not os.path.exists(output_path):

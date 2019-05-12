@@ -2,6 +2,11 @@
 checkpoints/*/*
 checkpoints/*.zip
 testing_res/
+training_set/
+testing_set/
+
+*.tflite
+*.pb
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
