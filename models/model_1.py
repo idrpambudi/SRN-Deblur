@@ -10,6 +10,7 @@ import tensorflow.contrib.slim as slim
 from tqdm import tqdm
 from datetime import datetime
 from util.util import *
+from util.var_storage import fp32_trainable_vars
 from util.BasicConvLSTMCell import *
 
 
@@ -22,6 +23,7 @@ class DEBLUR(object):
 
         # if args.phase == 'train':
         self.crop_size = 256
+        self.dtype = tf.float32 if args.dtype == 'fp32' else tf.float16
         self.data_list = open(args.datalist, 'rt').read().splitlines()
         self.data_list = list(map(lambda x: x.split(' '), self.data_list))
         random.shuffle(self.data_list)
@@ -36,7 +38,6 @@ class DEBLUR(object):
         self.learning_rate = args.learning_rate
         print(len(self.data_list))
         print(self.data_size)
-        print(self.epoch)
 
     def input_producer(self, batch_size=10):
         def read_data():
@@ -72,10 +73,10 @@ class DEBLUR(object):
         if self.args.model == 'lstm':
             with tf.variable_scope('LSTM'):
                 cell = BasicConvLSTMCell([h / 4, w / 4], [3, 3], 128)
-                rnn_state = cell.zero_state(batch_size=self.batch_size, dtype=tf.float32)
+                rnn_state = cell.zero_state(batch_size=self.batch_size, dtype=self.dtype)
 
         x_unwrap = []
-        with tf.variable_scope(scope, reuse=reuse):
+        with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
             with slim.arg_scope([slim.conv2d, slim.conv2d_transpose, slim.separable_conv2d],
                                 activation_fn=tf.nn.relu, padding='SAME', normalizer_fn=None,
                                 weights_initializer=tf.contrib.layers.xavier_initializer(uniform=True),
@@ -86,29 +87,29 @@ class DEBLUR(object):
                     scale = self.scale ** (self.n_levels - i - 1)
                     hi = int(round(h * scale))
                     wi = int(round(w * scale))
+
                     inp_blur = tf.image.resize_images(inputs, [hi, wi], method=0)
-                    inp_pred = tf.stop_gradient(tf.image.resize_images(inp_pred, [hi, wi], method=0))
+                    inp_blur = tf.cast(inp_blur, self.dtype)
+                    print(inp_pred.dtype)
+                    inp_pred = tf.image.resize_images(inp_pred, [hi, wi], method=0)
+                    inp_pred = tf.cast(inp_pred, self.dtype)
+                    print(inp_pred.dtype)
+                    inp_pred = tf.stop_gradient(inp_pred)
                     inp_all = tf.concat([inp_blur, inp_pred], axis=3, name='inp')
+
                     if self.args.model == 'lstm':
                         rnn_state = tf.image.resize_images(rnn_state, [hi // 4, wi // 4], method=0)
 
                     # encoder
-                    # conv1_1 = slim.conv2d(inp_all, 32, [5, 5], scope='enc1_1')
-                    # conv1_1 = slim.separable_conv2d(inp_all, 0, [ksize, ksize], scope='enc1_1')
                     conv1_1 = slim.separable_conv2d(inp_all, 32, [5, 5], scope='enc1_1_dw')
-                    # conv1_1 = slim.conv2d(conv1_1_dw, 32, [1, 1], scope='enc1_1')
                     conv1_2 = ResnetBlock(conv1_1, 32, 5, scope='enc1_2')
                     conv1_3 = ResnetBlock(conv1_2, 32, 5, scope='enc1_3')
                     conv1_4 = ResnetBlock(conv1_3, 32, 5, scope='enc1_4')
-                    # conv2_1 = slim.conv2d(conv1_4, 64, [5, 5], stride=2, scope='enc2_1')
                     conv2_1 = slim.separable_conv2d(conv1_4, 64, [5, 5], stride=2, scope='enc2_1_dw')
-                    # conv2_1 = slim.conv2d(conv2_1_dw, 64, [1, 1], scope='enc2_1')
                     conv2_2 = ResnetBlock(conv2_1, 64, 5, scope='enc2_2')
                     conv2_3 = ResnetBlock(conv2_2, 64, 5, scope='enc2_3')
                     conv2_4 = ResnetBlock(conv2_3, 64, 5, scope='enc2_4')
-                    # conv3_1 = slim.conv2d(conv2_4, 128, [5, 5], stride=2, scope='enc3_1')
                     conv3_1 = slim.separable_conv2d(conv2_4, 128, [5, 5], stride=2, scope='enc3_1_dw')
-                    # conv3_1 = slim.conv2d(conv3_1_dw, 128, [1, 1], scope='enc3_1')
                     conv3_2 = ResnetBlock(conv3_1, 128, 5, scope='enc3_2')
                     conv3_3 = ResnetBlock(conv3_2, 128, 5, scope='enc3_3')
                     conv3_4 = ResnetBlock(conv3_3, 128, 5, scope='enc3_4')
@@ -136,22 +137,22 @@ class DEBLUR(object):
                     # inp_pred_dw = slim.separable_conv2d(deconv1_1, self.chns, [5, 5], activation_fn=None, scope='dec1_0_dw')
                     # inp_pred = slim.conv2d(inp_pred_dw, self.chns, [1, 1], activation_fn=None, scope='dec1_0')
                     
-                    if i >= 0:
-                        x_unwrap.append(inp_pred)
-                    if i == 0:
-                        tf.get_variable_scope().reuse_variables()
-
+                    x_unwrap.append(inp_pred)
             return x_unwrap
 
     def build_model(self):
         img_in, img_gt = self.input_producer(self.batch_size)
+        img_in = tf.cast(img_in, self.dtype)
 
         tf.summary.image('img_in', im2uint8(img_in))
         tf.summary.image('img_gt', im2uint8(img_gt))
         print('img_in, img_gt', img_in.get_shape(), img_gt.get_shape())
 
         # generator
-        x_unwrap = self.generator(img_in, reuse=False, scope='g_net')
+        with fp32_trainable_vars():
+            x_unwrap = self.generator(img_in, reuse=False, scope='g_net')
+        x_unwrap = [tf.cast(x, tf.float32) for x in x_unwrap]
+
         # calculate multi-scale loss
         self.loss_total = 0
         for i in range(self.n_levels):
@@ -177,6 +178,11 @@ class DEBLUR(object):
     def train(self, checkpoint_step=0):
         def get_optimizer(loss, var_list=None, global_step=tf.Variable(initial_value=0, dtype=tf.int32, trainable=False), is_gradient_clip=False):
             train_op = tf.train.AdamOptimizer(self.lr)
+
+            if self.dtype == tf.float32:
+                loss_scale_manager = tf.contrib.mixed_precision.FixedLossScaleManager(2**12)
+                train_op = tf.contrib.mixed_precision.LossScaleOptimizer(train_op, loss_scale_manager)
+
             if is_gradient_clip:
                 grads_and_vars = train_op.compute_gradients(loss, var_list=var_list)
                 unchanged_gvs = [(grad, var) for grad, var in grads_and_vars if not 'LSTM' in var.name]
@@ -195,8 +201,8 @@ class DEBLUR(object):
         self.build_model()
 
         # learning rate decay
-        self.lr = tf.train.polynomial_decay(self.learning_rate, global_step, self.max_steps, end_learning_rate=0.0,
-                                            power=0.3)
+        self.lr = tf.train.polynomial_decay(
+            self.learning_rate, global_step, self.max_steps, end_learning_rate=self.learning_rate*1e-2, power=0.9)
         tf.summary.scalar('learning_rate', self.lr)
 
         # training operators
@@ -224,7 +230,7 @@ class DEBLUR(object):
             epoch_loss = 0
             epoch_start_time = time.time()
 
-            iterator = tqdm(range(self.data_size))
+            iterator = tqdm(range(self.data_size), leave=False, desc='Epoch {}'.format(ep), ncols=100)
             for step in iterator:
                 # update G network
                 _, loss_total_val = sess.run([train_gnet, self.loss_total])
@@ -232,19 +238,21 @@ class DEBLUR(object):
                 epoch_loss += loss_total_val
                 global_step += 1
 
-                iterator.set_postfix({'loss': loss_total_val})
+                iterator.set_postfix({'step_loss': loss_total_val})
 
-            mean_epoch_loss = epoch_loss / len(self.data_list)
             epoch_duration = time.time() - epoch_start_time
-            data_per_second = len(self.data_list) / epoch_duration
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            mean_epoch_loss = epoch_loss * self.batch_size / len(self.data_list)
+            data_per_second = len(self.data_list) / epoch_duration
 
-            epoch_str = '{}: epoch {}, loss = {:.6f} ({:.1f} data/s; {:.2f} s/epoch)'.format(current_time, ep, mean_epoch_loss, data_per_second, epoch_duration)
+            epoch_str = 'Epoch {}: average_loss = {:.5f} ({:.1f} data/s; {:.2f} s/epoch), {}'.format(
+                ep, mean_epoch_loss, data_per_second, epoch_duration, current_time)
             tqdm.write(epoch_str)
    
             summary_str = sess.run(summary_op)
             summary_writer.add_summary(summary_str, global_step=global_step)
-            # Save the model checkpoint periodically.
+            
+            # Save the model checkpoint periodically every 5 epoch.
             if ep % 5 == 0 or ep == self.epoch:
                 checkpoint_path = os.path.join(self.train_dir, 'checkpoints')
                 self.save(sess, checkpoint_path, ep)
@@ -275,6 +283,38 @@ class DEBLUR(object):
             print(" [*] Reading checkpoints... ERROR")
             return False
 
+    def eval(self, step, height=720, width=1280, file_dir='eval_set'):
+        inp_chns = 3 if self.args.model == 'color' else 1
+        self.batch_size = 1 if self.args.model == 'color' else 3
+        inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=self.dtype)
+        img_gt = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=self.dtype)
+        outputs = self.generator(inputs, reuse=False)
+    
+        sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
+
+        self.saver = tf.train.Saver()
+        self.load(sess, self.train_dir, step=step)
+
+        # calculate multi-scale loss
+        loss_total = 0
+        for i in range(self.n_levels):
+            _, hi, wi, _ = outputs[i].get_shape().as_list()
+            gt_i = tf.image.resize_images(img_gt, [hi, wi], method=0)
+            loss = tf.reduce_mean((gt_i - outputs[i]) ** 2)
+            loss_total += loss
+        
+        eval_loss = 0
+        iterator = tqdm(range(len(self.data_list)))
+        for i in iterator:
+            sharp = cv2.imread(os.path.join(file_dir, self.data_list[i][0]))
+            sharp = np.expand_dims(sharp, axis=0)
+            blur = cv2.imread(os.path.join(file_dir, self.data_list[i][1]))
+            blur = np.expand_dims(blur, axis=0)
+            loss = sess.run(loss_total, feed_dict={inputs: blur/255.0, img_gt: sharp/255.0})
+            eval_loss += loss
+            iterator.set_postfix_str('loss = {}'.format(loss))
+        print(eval_loss / len(self.data_list))
+
     def test(self, height, width, input_path, output_path, step):
         if not os.path.exists(output_path):
             os.makedirs(output_path)
@@ -283,7 +323,7 @@ class DEBLUR(object):
         H, W = height, width
         inp_chns = 3 if self.args.model == 'color' else 1
         self.batch_size = 1 if self.args.model == 'color' else 3
-        inputs = tf.placeholder(shape=[self.batch_size, H, W, inp_chns], dtype=tf.float32)
+        inputs = tf.placeholder(shape=[self.batch_size, H, W, inp_chns], dtype=self.dtype)
         outputs = self.generator(inputs, reuse=False)
     
         sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
@@ -342,7 +382,7 @@ class DEBLUR(object):
             H, W = height, width
             inp_chns = 3 if self.args.model == 'color' else 1
             self.batch_size = 1 if self.args.model == 'color' else 3
-            inputs = tf.placeholder(shape=[self.batch_size, H, W, inp_chns], dtype=tf.float32)
+            inputs = tf.placeholder(shape=[self.batch_size, H, W, inp_chns], dtype=self.dtype)
             outputs = self.generator(inputs, reuse=False)
 
             opts = tf.profiler.ProfileOptionBuilder.float_operation()    
@@ -357,7 +397,7 @@ class DEBLUR(object):
     def convert_tflite(self, step, height, width):
         inp_chns = 3 if self.args.model == 'color' else 1
         self.batch_size = 1 if self.args.model == 'color' else 3
-        inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=tf.float32)
+        inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=self.dtype)
         outputs = self.generator(inputs, reuse=False)
 
         print(inputs.name)

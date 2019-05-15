@@ -10,6 +10,7 @@ import tensorflow.contrib.slim as slim
 from tqdm import tqdm
 from datetime import datetime
 from util.util import *
+from util.var_storage import fp32_trainable_vars
 from util.BasicConvLSTMCell import *
 
 
@@ -22,6 +23,7 @@ class DEBLUR(object):
 
         # if args.phase == 'train':
         self.crop_size = 256
+        self.dtype = tf.float32 if args.dtype == 'fp32' else tf.float16
         self.data_list = open(args.datalist, 'rt').read().splitlines()
         self.data_list = list(map(lambda x: x.split(' '), self.data_list))
         random.shuffle(self.data_list)
@@ -68,13 +70,8 @@ class DEBLUR(object):
     def generator(self, inputs, reuse=False, scope='g_net'):
         n, h, w, c = inputs.get_shape().as_list()
 
-        if self.args.model == 'lstm':
-            with tf.variable_scope('LSTM'):
-                cell = BasicConvLSTMCell([h / 4, w / 4], [3, 3], 128)
-                rnn_state = cell.zero_state(batch_size=self.batch_size, dtype=tf.float32)
-
         x_unwrap = []
-        with tf.variable_scope(scope, reuse=reuse):
+        with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
             with slim.arg_scope([slim.conv2d, slim.conv2d_transpose, slim.separable_conv2d],
                                 activation_fn=tf.nn.relu, padding='SAME', normalizer_fn=None,
                                 weights_initializer=tf.contrib.layers.xavier_initializer(uniform=True),
@@ -82,41 +79,31 @@ class DEBLUR(object):
 
                 inp_pred = inputs
                 for i in range(self.n_levels):
-                    scale = self.scale ** (self.n_levels - i - 1)
-                    hi = int(round(h * scale))
-                    wi = int(round(w * scale))
-                    inp_blur = tf.image.resize_images(inputs, [hi, wi], method=0)
-                    inp_pred = tf.stop_gradient(tf.image.resize_images(inp_pred, [hi, wi], method=0))
+                    stride = 2 ** (self.n_levels - i - 1)
+                    inp_blur = slim.separable_conv2d(inputs, 16, [5, 5], stride=stride, scope='inp_blur')
+                    print(inp_pred)
+                    if i == 0:
+                        inp_pred = inp_blur
+                    else:
+                        inp_pred = slim.conv2d_transpose(inp_pred, 16, [5, 5], stride=2, scope='inp_pred') 
                     inp_all = tf.concat([inp_blur, inp_pred], axis=3, name='inp')
-                    if self.args.model == 'lstm':
-                        rnn_state = tf.image.resize_images(rnn_state, [hi // 4, wi // 4], method=0)
-
                     # encoder
-                    # conv1_1 = slim.conv2d(inp_all, 32, [5, 5], scope='enc1_1')
-                    # conv1_1 = slim.separable_conv2d(inp_all, 0, [ksize, ksize], scope='enc1_1')
-                    conv1_1 = slim.separable_conv2d(inp_all, 32, [5, 5], scope='enc1_1_dw')
-                    # conv1_1 = slim.conv2d(conv1_1_dw, 32, [1, 1], scope='enc1_1')
-                    conv1_2 = ResnetBlock(conv1_1, 32, 5, scope='enc1_2')
+                    # conv1_1 = slim.separable_conv2d(inp_all, 32, [5, 5], scope='enc1_1_dw')
+                    print(inp_all)
+                    conv1_2 = ResnetBlock(inp_all, 32, 5, scope='enc1_2')
                     conv1_3 = ResnetBlock(conv1_2, 32, 5, scope='enc1_3')
                     conv1_4 = ResnetBlock(conv1_3, 32, 5, scope='enc1_4')
-                    # conv2_1 = slim.conv2d(conv1_4, 64, [5, 5], stride=2, scope='enc2_1')
                     conv2_1 = slim.separable_conv2d(conv1_4, 64, [5, 5], stride=2, scope='enc2_1_dw')
-                    # conv2_1 = slim.conv2d(conv2_1_dw, 64, [1, 1], scope='enc2_1')
                     conv2_2 = ResnetBlock(conv2_1, 64, 5, scope='enc2_2')
                     conv2_3 = ResnetBlock(conv2_2, 64, 5, scope='enc2_3')
                     conv2_4 = ResnetBlock(conv2_3, 64, 5, scope='enc2_4')
-                    # conv3_1 = slim.conv2d(conv2_4, 128, [5, 5], stride=2, scope='enc3_1')
                     conv3_1 = slim.separable_conv2d(conv2_4, 128, [5, 5], stride=2, scope='enc3_1_dw')
-                    # conv3_1 = slim.conv2d(conv3_1_dw, 128, [1, 1], scope='enc3_1')
                     conv3_2 = ResnetBlock(conv3_1, 128, 5, scope='enc3_2')
                     conv3_3 = ResnetBlock(conv3_2, 128, 5, scope='enc3_3')
                     conv3_4 = ResnetBlock(conv3_3, 128, 5, scope='enc3_4')
 
-                    if self.args.model == 'lstm':
-                        deconv3_4, rnn_state = cell(conv3_4, rnn_state)
-                    else:
-                        deconv3_4 = conv3_4
-
+                    deconv3_4 = conv3_4
+                    
                     # decoder
                     deconv3_3 = ResnetBlock(deconv3_4, 128, 5, scope='dec3_3')
                     deconv3_2 = ResnetBlock(deconv3_3, 128, 5, scope='dec3_2')
@@ -135,22 +122,25 @@ class DEBLUR(object):
                     # inp_pred_dw = slim.separable_conv2d(deconv1_1, self.chns, [5, 5], activation_fn=None, scope='dec1_0_dw')
                     # inp_pred = slim.conv2d(inp_pred_dw, self.chns, [1, 1], activation_fn=None, scope='dec1_0')
                     
-                    if i >= 0:
-                        x_unwrap.append(inp_pred)
-                    if i == 0:
-                        tf.get_variable_scope().reuse_variables()
+                    x_unwrap.append(inp_pred)
+                    # if i == 0:
+                    #     tf.get_variable_scope().reuse_variables()
 
             return x_unwrap
 
     def build_model(self):
         img_in, img_gt = self.input_producer(self.batch_size)
+        img_in = tf.cast(img_in, self.dtype)
 
         tf.summary.image('img_in', im2uint8(img_in))
         tf.summary.image('img_gt', im2uint8(img_gt))
         print('img_in, img_gt', img_in.get_shape(), img_gt.get_shape())
 
         # generator
-        x_unwrap = self.generator(img_in, reuse=False, scope='g_net')
+        with fp32_trainable_vars():
+            x_unwrap = self.generator(img_in, reuse=False, scope='g_net')
+        x_unwrap = [tf.cast(x, tf.float32) for x in x_unwrap]
+
         # calculate multi-scale loss
         self.loss_total = 0
         for i in range(self.n_levels):
@@ -176,6 +166,11 @@ class DEBLUR(object):
     def train(self, checkpoint_step=0):
         def get_optimizer(loss, var_list=None, global_step=tf.Variable(initial_value=0, dtype=tf.int32, trainable=False), is_gradient_clip=False):
             train_op = tf.train.AdamOptimizer(self.lr)
+
+            if self.dtype == tf.float16:
+                loss_scale_manager = tf.contrib.mixed_precision.FixedLossScaleManager(2**12)
+                train_op = tf.contrib.mixed_precision.LossScaleOptimizer(train_op, loss_scale_manager)
+
             if is_gradient_clip:
                 grads_and_vars = train_op.compute_gradients(loss, var_list=var_list)
                 unchanged_gvs = [(grad, var) for grad, var in grads_and_vars if not 'LSTM' in var.name]
@@ -194,8 +189,8 @@ class DEBLUR(object):
         self.build_model()
 
         # learning rate decay
-        self.lr = tf.train.polynomial_decay(self.learning_rate, global_step, self.max_steps, end_learning_rate=0.0,
-                                            power=0.3)
+        self.lr = tf.train.polynomial_decay(
+            self.learning_rate, global_step, self.max_steps, end_learning_rate=self.learning_rate*1e-2, power=0.9)
         tf.summary.scalar('learning_rate', self.lr)
 
         # training operators
@@ -279,8 +274,8 @@ class DEBLUR(object):
     def eval(self, step, height=720, width=1280, file_dir='eval_set'):
         inp_chns = 3 if self.args.model == 'color' else 1
         self.batch_size = 1 if self.args.model == 'color' else 3
-        inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=tf.float32)
-        img_gt = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=tf.float32)
+        inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=self.dtype)
+        img_gt = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=self.dtype)
         outputs = self.generator(inputs, reuse=False)
     
         sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
@@ -316,7 +311,7 @@ class DEBLUR(object):
         H, W = height, width
         inp_chns = 3 if self.args.model == 'color' else 1
         self.batch_size = 1 if self.args.model == 'color' else 3
-        inputs = tf.placeholder(shape=[self.batch_size, H, W, inp_chns], dtype=tf.float32)
+        inputs = tf.placeholder(shape=[self.batch_size, H, W, inp_chns], dtype=self.dtype)
         outputs = self.generator(inputs, reuse=False)
     
         sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
@@ -375,7 +370,7 @@ class DEBLUR(object):
             H, W = height, width
             inp_chns = 3 if self.args.model == 'color' else 1
             self.batch_size = 1 if self.args.model == 'color' else 3
-            inputs = tf.placeholder(shape=[self.batch_size, H, W, inp_chns], dtype=tf.float32)
+            inputs = tf.placeholder(shape=[self.batch_size, H, W, inp_chns], dtype=self.dtype)
             outputs = self.generator(inputs, reuse=False)
 
             opts = tf.profiler.ProfileOptionBuilder.float_operation()    
@@ -390,7 +385,7 @@ class DEBLUR(object):
     def convert_tflite(self, step, height, width):
         inp_chns = 3 if self.args.model == 'color' else 1
         self.batch_size = 1 if self.args.model == 'color' else 3
-        inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=tf.float32)
+        inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=self.dtype)
         outputs = self.generator(inputs, reuse=False)
 
         print(inputs.name)

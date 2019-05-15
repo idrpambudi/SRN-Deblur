@@ -27,6 +27,9 @@ def parse_args():
                         help='to be retrieved checkpoint step')
     parser.add_argument('--continue_training', type=bool, default=False,
                         help='determine continue training from checkpoint')
+    parser.add_argument('--dtype', type=str, default='fp32',
+                        help='model datatype, using mixed precision if fp16')
+                        
     args = parser.parse_args()
     return args
 
