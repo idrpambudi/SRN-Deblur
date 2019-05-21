@@ -137,9 +137,9 @@ class DEBLUR(object):
         print('img_in, img_gt', img_in.get_shape(), img_gt.get_shape())
 
         # generator
-        with fp32_trainable_vars():
-            x_unwrap = self.generator(img_in, reuse=False, scope='g_net')
-        x_unwrap = [tf.cast(x, tf.float32) for x in x_unwrap]
+        # with fp32_trainable_vars():
+        x_unwrap = self.generator(img_in, reuse=False, scope='g_net')
+        # x_unwrap = [tf.cast(x, tf.float32) for x in x_unwrap]
 
         # calculate multi-scale loss
         self.loss_total = 0
@@ -153,7 +153,7 @@ class DEBLUR(object):
             tf.summary.scalar('loss_' + str(i), loss)
 
         # losses
-        tf.summary.scalar('loss_total', self.loss_total)
+        # tf.summary.scalar('loss_total', self.loss_total)
 
         # training vars
         all_vars = tf.trainable_variables()
@@ -187,6 +187,8 @@ class DEBLUR(object):
 
         # build model
         self.build_model()
+        self.epoch_average_loss = 0
+        tf.summary.scalar('epoch loss', self.epoch_average_loss)
 
         # learning rate decay
         self.lr = tf.train.polynomial_decay(
@@ -230,11 +232,11 @@ class DEBLUR(object):
 
             epoch_duration = time.time() - epoch_start_time
             current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            mean_epoch_loss = epoch_loss * self.batch_size / len(self.data_list)
+            self.epoch_average_loss = epoch_loss * self.batch_size / len(self.data_list)
             data_per_second = len(self.data_list) / epoch_duration
 
             epoch_str = 'Epoch {}: average_loss = {:.5f} ({:.1f} data/s; {:.2f} s/epoch), {}'.format(
-                ep, mean_epoch_loss, data_per_second, epoch_duration, current_time)
+                ep, self.epoch_average_loss, data_per_second, epoch_duration, current_time)
             tqdm.write(epoch_str)
    
             summary_str = sess.run(summary_op)

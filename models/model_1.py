@@ -149,9 +149,9 @@ class DEBLUR(object):
         print('img_in, img_gt', img_in.get_shape(), img_gt.get_shape())
 
         # generator
-        with fp32_trainable_vars():
-            x_unwrap = self.generator(img_in, reuse=False, scope='g_net')
-        x_unwrap = [tf.cast(x, tf.float32) for x in x_unwrap]
+        # with fp32_trainable_vars():
+        x_unwrap = self.generator(img_in, reuse=False, scope='g_net')
+        # x_unwrap = [tf.cast(x, tf.float32) for x in x_unwrap]
 
         # calculate multi-scale loss
         self.loss_total = 0
@@ -179,7 +179,7 @@ class DEBLUR(object):
         def get_optimizer(loss, var_list=None, global_step=tf.Variable(initial_value=0, dtype=tf.int32, trainable=False), is_gradient_clip=False):
             train_op = tf.train.AdamOptimizer(self.lr)
 
-            if self.dtype == tf.float32:
+            if self.dtype == tf.float16:
                 loss_scale_manager = tf.contrib.mixed_precision.FixedLossScaleManager(2**12)
                 train_op = tf.contrib.mixed_precision.LossScaleOptimizer(train_op, loss_scale_manager)
 
