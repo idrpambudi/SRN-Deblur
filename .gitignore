@@ -1,6 +1,7 @@
 .idea/
 checkpoints/*/*
 checkpoints/*.zip
+eval_set/
 testing_res/
 training_set/
 testing_set/
