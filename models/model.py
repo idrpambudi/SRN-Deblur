@@ -11,7 +11,7 @@ import tensorflow.contrib.slim as slim
 from tqdm import tqdm
 from datetime import datetime
 from util.util import *
-from models.dw_smaller import generator
+from models.dw_shared import generator
 
 
 class DEBLUR(object):
@@ -127,6 +127,7 @@ class DEBLUR(object):
         self.sess = sess
         self.saver = tf.train.Saver(max_to_keep=50, keep_checkpoint_every_n_hours=1)
         
+        sess.run(tf.global_variables_initializer())
         if self.checkpoint > 0:
             self.load(sess, self.train_dir, epoch=self.checkpoint)
         else:
@@ -198,7 +199,7 @@ class DEBLUR(object):
             print(" [*] Reading checkpoints... ERROR")
             return False
 
-    def eval(self, height=720, width=1280, file_dir='training_set'):
+    def eval(self, file_dir, height=720, width=1280):
         inp_chns = 3 if self.args.model == 'color' else 1
         self.batch_size = 1 if self.args.model == 'color' else 3
         inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=self.dtype)
@@ -254,10 +255,10 @@ class DEBLUR(object):
         outputs = self.generator(inputs)
     
         sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
-        sess.run(tf.global_variables_initializer())
+        # sess.run(tf.global_variables_initializer())
 
-        # self.saver = tf.train.Saver()
-        # self.load(sess, self.train_dir, epoch=self.checkpoint)
+        self.saver = tf.train.Saver()
+        self.load(sess, self.train_dir, epoch=self.checkpoint)
 
         for imgName in imgsName:
             blur = cv2.imread(os.path.join(input_path, imgName))
@@ -322,7 +323,7 @@ class DEBLUR(object):
             print("{:,} --- {:,}".format(flops.total_float_ops, params.total_parameters))
 
 
-    def convert_tflite(self, height, width, is_quantize=True):
+    def convert_tflite(self, height, width, is_quantize=False):
         inp_chns = 3 if self.args.model == 'color' else 1
         self.batch_size = 1 if self.args.model == 'color' else 3
         inputs = tf.placeholder(shape=[self.batch_size, height, width, inp_chns], dtype=self.dtype)
@@ -332,12 +333,12 @@ class DEBLUR(object):
         print(outputs[-1].name)
         sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
 
-        g = tf.get_default_graph()
-        tf.contrib.quantize.create_eval_graph(input_graph=g)
+        # g = tf.get_default_graph()
+        # tf.contrib.quantize.create_eval_graph(input_graph=g)
 
         self.saver = tf.train.Saver()
-        # self.load(sess, self.train_dir, epoch=self.checkpoint)
-        sess.run(tf.global_variables_initializer())
+        self.load(sess, self.train_dir, epoch=self.checkpoint)
+        # sess.run(tf.global_variables_initializer())
 
         # converter = tf.lite.TFLiteConverter.from_session(sess, [inputs], [outputs[-1]])
 
@@ -361,7 +362,7 @@ class DEBLUR(object):
         converter.post_training_quantize = is_quantize
         tflite_model = converter.convert()
 
-        open("converted_model-{}.tflite".format(step), "wb").write(tflite_model)
+        open("converted_model-{}.tflite".format(self.checkpoint), "wb").write(tflite_model)
 
         interpreter = tf.lite.Interpreter(model_content=tflite_model)
         interpreter.allocate_tensors()

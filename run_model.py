@@ -19,6 +19,10 @@ def parse_args():
                         help='height for the tensorflow placeholder, should be multiples of 16')
     parser.add_argument('--width', type=int, default=1280,
                         help='width for the tensorflow placeholder, should be multiple of 16 for 3 scales')
+    parser.add_argument('--training_path', type=str, default='./training_set',
+                        help='input path for training images')
+    parser.add_argument('--eval_path', type=str, default='./eval_set',
+                        help='input path for evaluation images')
     parser.add_argument('--input_path', type=str, default='./testing_set',
                         help='input path for testing images')
     parser.add_argument('--output_path', type=str, default='./testing_res',
@@ -44,15 +48,15 @@ def main(_):
     # set up deblur models
     deblur = model.DEBLUR(args)
     if args.phase == 'test':
-        deblur.test(args.height, args.width, args.input_path, args.output_path, args.checkpoint)
+        deblur.test(args.height, args.width, args.input_path, args.output_path)
     elif args.phase == 'train':
         deblur.train()
     elif args.phase == 'check':
         deblur.check(args.height, args.width)
     elif args.phase == 'convert':
-        deblur.convert_tflite(args.checkpoint, args.height, args.width)
+        deblur.convert_tflite(args.height, args.width)
     elif args.phase == 'eval':
-        deblur.eval(args.checkpoint)
+        deblur.eval(file_dir=args.eval_path)
     else:
         print('phase should be set to either test or train')
 

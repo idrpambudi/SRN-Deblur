@@ -8,7 +8,7 @@ def generator(inputs, scope='g_net',n_levels=3):
     x_unwrap = []
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         with slim.arg_scope([slim.conv2d, slim.conv2d_transpose, slim.separable_conv2d],
-                            activation_fn=parametric_relu, padding='SAME', normalizer_fn=tf.contrib.layers.instance_norm,
+                            activation_fn=tf.nn.relu, padding='SAME', normalizer_fn=None,
                             weights_initializer=tf.contrib.layers.xavier_initializer(uniform=True),
                             biases_initializer=tf.constant_initializer(0.0)):
 

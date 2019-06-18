@@ -52,7 +52,7 @@ def ResBottleneckBlock(x, dim, ksize, scope='rb', activation_fn=parametric_relu)
         return net
 
 
-def ResnetBlock(x, dim, ksize, scope='rb', activation_fn=parametric_relu):
+def ResnetBlock(x, dim, ksize, scope='rb'):
     with tf.variable_scope(scope):
         net = slim.separable_conv2d(x, dim, [ksize, ksize], scope='dw_conv1')
         net = slim.separable_conv2d(net, dim, [ksize, ksize], activation_fn=None, scope='dw_conv2')
